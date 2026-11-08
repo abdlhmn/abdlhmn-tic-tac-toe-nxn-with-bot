@@ -1,4 +1,5 @@
-import pygame, copy
+
+import pygame, copy, random
 from constraints import *
 from sys import exit
 
@@ -93,8 +94,10 @@ class HumanPlayers(Players):
 
 
 class BotPlayers(Players):
-    def __init__(self, lst, turn, n=5):
+    def __init__(self, lst, turn, n=5, difficulty='hard'):
+        self.difficulty = difficulty
         self.n = n
+        self.bot_turn = turn
         coords = self.generate_move(lst=lst, turn=turn)
         Players.__init__(self, turn, coords, n)
 
@@ -102,24 +105,32 @@ class BotPlayers(Players):
         self.coords = coords
 
     def generate_move(self, lst=None, turn=1):
+        if self.difficulty == 'easy':
+            moves = [(col, row) for row in range(self.n) for col in range(self.n) if not lst[row][col]]
+            return random.choice(moves)
+        depth = 1 if self.difficulty == 'medium' else 4
         best_score = float('-inf')
         best_move = None
+        beta = float('inf')
+        alpha = float('-inf')
         for row in range(self.n):
             for col in range(self.n):
                 if not lst[row][col]:
                     lst[row][col] = Players(turn, (col, row), n=self.n)
-                    minimax_score = self.minimax(turn, lst, turn!=1, depth=2)
+                    minimax_score = self.minimax(turn, lst, False, depth=depth, alpha=alpha, beta=beta)
+                    alpha = max(alpha, minimax_score)
+                    
                     lst[row][col] = ''
                     if minimax_score > best_score:
                         best_score = minimax_score
                         best_move = (col, row)
         return best_move
 
-    def minimax(self, turn, board, is_maximizing, depth=2):
+    def minimax(self, turn, board, is_maximizing, depth=4, alpha=float('-inf'), beta=float('inf')):
         winner = self.winner_check_bot(board)
-        if winner==1:
+        if winner==self.bot_turn:
             return 10**5
-        if winner==0:
+        if winner==1-self.bot_turn:
             return -10**5
         b_flat = []
         for row in board:
@@ -127,22 +138,28 @@ class BotPlayers(Players):
         if all(b_flat):
             return 0
         if depth == 0:
-            return self.evaluate(board)
+            return self.evaluate(board) if self.bot_turn == 1 else -self.evaluate(board)
 
         if is_maximizing: 
             score = float('-inf')
-            turn = 1
+            turn = self.bot_turn
         else:
             score = float('inf')
-            turn = 0
+            turn = 1-self.bot_turn
         for row in range(self.n):
             for col in range(self.n):
                 if not board[row][col]:
                     board[row][col] = Players(turn, (col, row), n=self.n)
-                    minimax_score = self.minimax(turn, board, not is_maximizing, depth=depth-1)
+                    minimax_score = self.minimax(turn, board, not is_maximizing, depth=depth-1, alpha=alpha, beta=beta)
                     board[row][col] = ''
                     if minimax_score > score and is_maximizing or minimax_score < score and not is_maximizing:
                         score = minimax_score
+                    if is_maximizing:
+                        alpha = max(alpha, score)
+                    else:
+                        beta = min(beta, score)
+                    if alpha >= beta:
+                        return score
         return score
 
     def evaluate(self, board):
@@ -198,6 +215,7 @@ class BotPlayers(Players):
 
 
 
+
         
 class Main:
     def __init__(self, n=5):
@@ -206,8 +224,11 @@ class Main:
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption('Gamerisms')
         self.clock = pygame.time.Clock()
-        self.game_over = 'human'
+        self.game_over = 'menu'
         self.counter = 1
+        self.human_turn = 0
+        self.bot_turn = 1
+        self.difficulty = 'hard'
         self.bg = pygame.image.load('bg.png').convert_alpha()
         self.bg = pygame.transform.scale(self.bg, (WIDTH, HEIGHT))
         self.bg_rect = self.bg.get_rect(center=(WIDTH//2, HEIGHT//2))
@@ -219,6 +240,11 @@ class Main:
         self.winner_player = Buttons((WIDTH//2, HEIGHT//3), self.button_surf)
         self.text_player = Buttons((WIDTH//2, HEIGHT//3+150), self.button_surf, 'play with a friend')
         self.bot_player = Buttons((WIDTH//2, HEIGHT//3+150*2), self.button_surf, 'play with a bot')
+        self.easy_button = Buttons((WIDTH//2, HEIGHT//3), self.button_surf, 'easy')
+        self.medium_button = Buttons((WIDTH//2, HEIGHT//3+150), self.button_surf, 'medium')
+        self.hard_button = Buttons((WIDTH//2, HEIGHT//3+150*2), self.button_surf, 'hard')
+        self.x_button = Buttons((WIDTH//2, HEIGHT//2-75), self.button_surf, 'play as X')
+        self.o_button = Buttons((WIDTH//2, HEIGHT//2+75), self.button_surf, 'play as O')
         self.board_lst = [['' for _ in range(self.n)] for _ in range(self.n)]
         self.start_coords, self.end_coords = None, None
         self.turn = self.counter % 2
@@ -242,29 +268,55 @@ class Main:
                 exit()
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if self.game_over in ('human', 'bot'):
+                    if self.game_over == 'bot' and self.turn != self.human_turn:
+                        continue
                     if 0 <= grid_coords[0] < self.n and 0 <= grid_coords[1] < self.n:
                         if not self.board_lst[grid_coords[1]][grid_coords[0]]:
                             self.make_move(grid_coords)
-                if self.game_over is True:
+                if self.game_over is True or self.game_over == 'menu':
                     if self.text_player.rect.collidepoint(mouse):
+                        self.initialise(self.n)
                         self.game_over = 'human'
                     elif self.bot_player.rect.collidepoint(mouse):
+                        self.game_over = 'choose_difficulty'
+                elif self.game_over == 'choose_difficulty':
+                    if self.easy_button.rect.collidepoint(mouse):
+                        self.difficulty = 'easy'
+                        self.game_over = 'choose_symbol'
+                    elif self.medium_button.rect.collidepoint(mouse):
+                        self.difficulty = 'medium'
+                        self.game_over = 'choose_symbol'
+                    elif self.hard_button.rect.collidepoint(mouse):
+                        self.difficulty = 'hard'
+                        self.game_over = 'choose_symbol'
+                elif self.game_over == 'choose_symbol':
+                    if self.x_button.rect.collidepoint(mouse):
+                        self.human_turn = 1
+                        self.bot_turn = 0
+                        self.initialise(self.n)
+                        self.game_over = 'bot'
+                    elif self.o_button.rect.collidepoint(mouse):
+                        self.human_turn = 0
+                        self.bot_turn = 1
+                        self.initialise(self.n)
                         self.game_over = 'bot'
                         self.make_move()
     
     def make_move(self, coords=None):
         # print(self.counter, 'counter initial')
         if self.game_over == 'bot':
-            if self.turn == 0 and coords:
+            if self.turn == self.human_turn and coords:
                 hp = HumanPlayers(self.turn, coords, n=self.n)
                 self.board_lst[coords[1]][coords[0]] = hp
                 self.start_coords, self.end_coords = hp.winner_check(self.board_lst)
                 self.counter += 1
                 self.turn = self.counter % 2
                 # print(self.counter, 'human')
-            if self.turn == 1 and self.start_coords is None:
+            if self.turn == self.bot_turn and self.start_coords is None:
+                if all(cell for row in self.board_lst for cell in row):
+                    return
                 # print('board check')
-                bot = BotPlayers(self.board_lst, self.turn, n=self.n)
+                bot = BotPlayers(self.board_lst, self.turn, n=self.n, difficulty=self.difficulty)
                 self.board_lst[bot.position[1]][bot.position[0]] = bot
                 # print(self.counter, 'bot')
                 # self.op()
@@ -284,6 +336,24 @@ class Main:
 
     def draw(self):
         # self.n = 4
+        if self.game_over == 'menu':
+            self.screen.blit(self.bg, self.bg_rect)
+            self.winner_player.textalise('TIC TAC TOE')
+            self.winner_player.draw(self.screen)
+            self.text_player.draw(self.screen)
+            self.bot_player.draw(self.screen)
+            return 'menu'
+        if self.game_over == 'choose_difficulty':
+            self.screen.blit(self.bg, self.bg_rect)
+            self.easy_button.draw(self.screen)
+            self.medium_button.draw(self.screen)
+            self.hard_button.draw(self.screen)
+            return 'choose_difficulty'
+        if self.game_over == 'choose_symbol':
+            self.screen.blit(self.bg, self.bg_rect)
+            self.x_button.draw(self.screen)
+            self.o_button.draw(self.screen)
+            return 'choose_symbol'
         if self.game_over is True:
             self.winner_player.textalise(self.text)
             self.screen.blit(self.bg, self.bg_rect)
@@ -295,7 +365,7 @@ class Main:
                 return 'human'
             if self.bot_player.clicked == True:
                 self.bot_player.clicked = False
-                return 'bot'
+                return 'choose_difficulty'
             else:
                 return True
         self.screen.fill(BG_COLOR)
