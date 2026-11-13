@@ -42,6 +42,7 @@ class Players:
         self.turn = turn
         self.position = position
         self.n = n
+        self.win_length = min(self.n, 4) if self.n != 4 else 3
         self.coords = (self.position[0]*WIDTH//self.n+10, self.position[1]*HEIGHT//self.n+10)
         self.rect = pygame.Rect(self.coords[0], self.coords[1], WIDTH//self.n-20, HEIGHT//self.n-20)
 
@@ -57,28 +58,23 @@ class Players:
         screen.blit(text, text_rect)
 
     def winner_check(self, lst):
-        nice_var = self.position[1]
-        vertical_line = [self == lst[i][self.position[0]] for i in range(self.n)]
-        diagonal = []
-        annoying_diagonal = []
-        for i in range(self.n):
-            diagonal.append(self == lst[i][i])
-            annoying_diagonal.append(self == lst[self.n-1-i][i])
-        
-        if all(map(lambda other:self==other, lst[nice_var])):
-            y = WIDTH/(2*self.n)+nice_var*(HEIGHT/self.n)
-            start_coords, end_coords = (0, y), (WIDTH, y)
-        elif all(vertical_line):
-            x = WIDTH/(2*self.n) + WIDTH/self.n*self.position[0]
-            start_coords, end_coords = (x, 0), (x, HEIGHT)
-        elif all(diagonal):
-            start_coords, end_coords = (0,0), (WIDTH, HEIGHT)
-        elif all(annoying_diagonal):
-            start_coords, end_coords = (0, HEIGHT), (WIDTH, 0)
-        else:
-            start_coords, end_coords = None, None
-        
-        return start_coords, end_coords
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+
+        for row in range(self.n):
+            for col in range(self.n):
+                for dx, dy in directions:
+                    end_col = col + (self.win_length-1)*dx
+                    end_row = row + (self.win_length-1)*dy
+
+                    if 0 <= end_col < self.n and 0 <= end_row < self.n:
+                        line = [lst[row+i*dy][col+i*dx] for i in range(self.win_length)]
+
+                        if all(self == cell for cell in line):
+                            start_coords = ((col+0.5)*WIDTH/self.n, (row+0.5)*HEIGHT/self.n)
+                            end_coords = ((end_col+0.5)*WIDTH/self.n, (end_row+0.5)*HEIGHT/self.n)
+                            return start_coords, end_coords
+
+        return None, None
 
     def __eq__(self, other):
         if isinstance(other, str):
@@ -105,6 +101,7 @@ class BotPlayers(Players):
     def __init__(self, lst, turn, n=5, difficulty='hard'):
         self.difficulty = difficulty
         self.n = n
+        self.win_length = min(self.n, 4) if self.n != 4 else 3
         self.bot_turn = turn
         coords = self.generate_move(lst=lst, turn=turn)
         Players.__init__(self, turn, coords, n)
@@ -129,7 +126,13 @@ class BotPlayers(Players):
             if random.random() < 0.5:
                 return random.choice(moves)
 
-        depth = 1 if self.difficulty == 'medium' else 4
+        # depth = 1 if self.difficulty == 'medium' else 3
+        if self.difficulty == 'medium':
+            depth = 1
+        elif self.n == 7: 
+            depth = 2
+        else:
+            depth = 3
         best_score = float('-inf')
         best_move = None
         beta = float('inf')
@@ -185,50 +188,50 @@ class BotPlayers(Players):
 
     def evaluate(self, board):
         total_score = 0
-        lines = []
-        for i in range(self.n):
-            vertical_lines = []
-            lines.append(board[i])
-            for j in range(self.n):
-                vertical_lines.append(board[j][i]) # vertical lines
-            lines.append(vertical_lines)
-        lines.append([board[i][i] for i in range(self.n)]) # diagonal lines
-        lines.append([board[self.n-1-i][i] for i in range(self.n)]) # diagonal lines
-        for line in lines:
-            x_count = 0
-            o_count = 0
-            for cell in line:
-                if cell:
-                    if cell.turn == 1:
-                        x_count += 1
-                    else:
-                        o_count += 1
-            if x_count > 0 and o_count > 0:
-                continue
-            if x_count > 0:
-                total_score += 10 ** x_count
-            elif o_count > 0:
-                total_score -= 10 ** o_count
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+
+        for row in range(self.n):
+            for col in range(self.n):
+                for dx, dy in directions:
+                    end_col = col + (self.win_length-1)*dx
+                    end_row = row + (self.win_length-1)*dy
+
+                    if 0 <= end_col < self.n and 0 <= end_row < self.n:
+                        line = [board[row+i*dy][col+i*dx] for i in range(self.win_length)]
+                        x_count = 0
+                        o_count = 0
+
+                        for cell in line:
+                            if cell:
+                                if cell.turn == 1:
+                                    x_count += 1
+                                else:
+                                    o_count += 1
+
+                        if x_count > 0 and o_count > 0:
+                            continue
+                        if x_count > 0:
+                            total_score += 10 ** x_count
+                        elif o_count > 0:
+                            total_score -= 10 ** o_count
+
         return total_score
 
     def winner_check_bot(self, board):
-        winning_lines = []
-        diagonal1 = []
-        diagonal2 = []
-        for i in range(self.n):
-            vertical_lines = []
-            winning_lines.append(board[i])
-            diagonal1.append(board[i][i]) # diagonal lines
-            diagonal2.append(board[self.n-1-i][i]) # diagonal lines
-            for j in range(self.n):
-                vertical_lines.append(board[j][i]) # vertical lines
-            winning_lines.append(vertical_lines)
-        winning_lines.append(diagonal1)
-        winning_lines.append(diagonal2)
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
 
-        for line in winning_lines:
-            if line[0] and all(line[0] == cell for cell in line):
-                return line[0].turn
+        for row in range(self.n):
+            for col in range(self.n):
+                for dx, dy in directions:
+                    end_col = col + (self.win_length-1)*dx
+                    end_row = row + (self.win_length-1)*dy
+
+                    if 0 <= end_col < self.n and 0 <= end_row < self.n:
+                        line = [board[row+i*dy][col+i*dx] for i in range(self.win_length)]
+
+                        if line[0] and all(line[0] == cell for cell in line):
+                            return line[0].turn
+
         return None
 
 
@@ -239,7 +242,7 @@ class Main:
         pygame.init()
         self.n = n
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        # pygame.display.set_caption('Gamerisms')
+        pygame.display.set_caption('Gamerisms')
         self.clock = pygame.time.Clock()
         self.game_over = 'menu'
         self.counter = 1
@@ -478,14 +481,14 @@ class Main:
 
         if self.start_coords and self.end_coords:
             pygame.draw.line(self.screen, LINE_COLOR, self.start_coords, self.end_coords, width=10)
-            self.text = ('O', 'X')[1-self.turn] + ' WON'
+            self.text = ('O', 'X')[1-self.turn] + ' won !! :)'
             pygame.display.update()
             pygame.time.wait(500)
             self.result_time = pygame.time.get_ticks()
             return True
 
         elif all(cell for row in self.board_lst for cell in row):
-            self.text = 'DRAW'
+            self.text = 'DRAW :('
             pygame.display.update()
             pygame.time.wait(500)
             self.result_time = pygame.time.get_ticks()
